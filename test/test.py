@@ -6,6 +6,7 @@ import json
 import numpy as np
 import pandas as pd
 import os
+import subprocess
 from pathlib import Path
 import torch
 import torch.backends.cudnn as cudnn
@@ -221,7 +222,13 @@ def packet_callback(packet, stream_num, model, model_llm, tokenizer, device):
     # print(packet.show())
     global packet_num
     try:
-        name = f"{packet[IP].src}:{packet.sport}_{packet[IP].dst}:{packet.dport}_{packet.proto}"
+        src_ip = packet[IP].src
+        src_port = packet.sport
+        dst_ip = packet[IP].dst
+        dst_port = packet.dport
+        proto = packet.proto
+        name = f"{src_ip}:{src_port}_{dst_ip}:{dst_port}_{proto}"
+        # name = f"{packet[IP].src}:{packet.sport}_{packet[IP].dst}:{packet.dport}_{packet.proto}"
     except:
         # packet_num += 1
         # print(f"packet_num={packet_num}")
@@ -242,6 +249,12 @@ def packet_callback(packet, stream_num, model, model_llm, tokenizer, device):
         generate_digest(f"./pcap/{name}.pcap")
         res = ["benign", "goldeneye", "hulk", "rudy", "slowbody2", "slowheaders", "slowloris", "slowread"][evaluate(image, model, device).item()]
         print(name, res)
+        if res != "benign":
+            # 1 preflow
+            block_attack_flow(src_ip, src_port, dst_ip, dst_port, proto)
+            # 2 block ip
+            # block_ip(src_ip)
+
         # res = "goldeneye"
         # if res != "benign":
         #     df = generate_prompt(name, res)
@@ -249,6 +262,39 @@ def packet_callback(packet, stream_num, model, model_llm, tokenizer, device):
         #     df[f"reply-{'gpt-4'}"] = df["prompt"].progress_apply(
         #         lambda x: llm.llm_generate(x, 'gpt-4', model_llm, tokenizer))
         #     df.to_csv(f"./pcap/{name}.csv", index=False)
+
+def block_attack_flow(src_ip, src_port, dst_ip, dst_port, protocol):
+    try:
+        command = [
+            'sudo', 'iptables', '-A', 'INPUT',
+            '-p', protocol,
+            '-s', src_ip,
+            '--sport', str(src_port),
+            '-d', dst_ip,
+            '--dport', str(dst_port),
+            '-j', 'DROP'
+        ]
+
+        subprocess.run(command, check=True)
+        print(f"Blocked attack flow: {src_ip}:{src_port} -> {dst_ip}:{dst_port} ({protocol})")
+
+    except subprocess.CalledProcessError as e:
+        print(f"Error blocking attack flow: {e}")
+
+def block_ip(src_ip):
+    try:
+        command = [
+            'sudo', 'iptables', '-A', 'INPUT',
+            '-s', src_ip,
+            '-j', 'DROP'
+        ]
+
+        subprocess.run(command, check=True)
+        print(f"Blocked all traffic from: {src_ip}")
+
+    except subprocess.CalledProcessError as e:
+        print(f"Error blocking traffic from {src_ip}: {e}")
+
 
 if __name__ == '__main__':
     packet_num = 0
